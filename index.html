@@ -1,0 +1,306 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Avaliação da Festa das Nações – Ciclo VIVA</title>
+<script src="https://cdn.tailwindcss.com/3.4.17"></script>
+<style>
+  :root { --navy:#0F172A; --amber:#F59E0B; --green:#16A34A; }
+  body { font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; background:#F1F5F9; color:var(--navy); }
+  h1, h2, .serif { font-family: Georgia, "Times New Roman", serif; }
+  /* Estrelas parciais: a variável --p define o preenchimento (0% a 100%) */
+  .stars { font-size:1.05rem; letter-spacing:2px; line-height:1; white-space:nowrap;
+    background:linear-gradient(90deg,#F59E0B var(--p),#CBD5E1 var(--p));
+    -webkit-background-clip:text; background-clip:text; color:transparent; -webkit-text-fill-color:transparent; }
+  input[type=range] { accent-color:var(--amber); }
+  details > summary { list-style:none; cursor:pointer; }
+  details > summary::-webkit-details-marker { display:none; }
+  details[open] > summary .chev { transform:rotate(90deg); }
+  .chev { transition:transform .15s; }
+  :focus-visible { outline:3px solid var(--amber); outline-offset:2px; }
+  .tab-on { border-bottom:4px solid var(--amber); color:#fff; }
+  .tab-off { border-bottom:4px solid transparent; color:#94A3B8; }
+  /* ===== Impressão / PDF (A4) ===== */
+  @page { size:A4; margin:14mm; }
+  @media print {
+    html, body { background:#fff !important; -webkit-print-color-adjust:exact; print-color-adjust:exact; }
+    #appView, .no-print { display:none !important; }
+    #reportView { display:block !important; }
+    .stand-report { break-inside:avoid; box-shadow:none !important; }
+    .rep-card { box-shadow:none !important; border:1px solid #CBD5E1 !important; }
+  }
+</style>
+</head>
+<body>
+
+<!-- ================= VISÃO DE AVALIAÇÃO ================= -->
+<div id="appView">
+  <header class="sticky top-0 z-20 bg-[#0F172A] text-white shadow-lg">
+    <div class="max-w-5xl mx-auto px-4 pt-4">
+      <div class="flex flex-wrap items-center justify-between gap-3">
+        <div>
+          <h1 class="text-xl sm:text-2xl font-bold leading-tight">Festa das Nações</h1>
+          <p class="text-amber-400 text-sm font-medium">Ficha de avaliação dos estandes · Ciclo VIVA</p>
+        </div>
+        <div class="flex flex-wrap gap-2">
+          <button id="btnReport" class="bg-amber-500 hover:bg-amber-400 text-[#0F172A] font-bold px-4 py-2 rounded-lg text-sm">Gerar Relatório Final &amp; Ranking</button>
+          <button id="btnReset" class="border border-slate-500 hover:bg-slate-800 px-3 py-2 rounded-lg text-sm">Limpar dados</button>
+        </div>
+      </div>
+      <nav id="tabs" class="flex gap-5 mt-3 overflow-x-auto" aria-label="Séries"></nav>
+    </div>
+  </header>
+
+  <main class="max-w-5xl mx-auto px-4 py-5">
+    <div class="flex flex-wrap items-center justify-between gap-3 mb-4">
+      <label class="text-sm font-medium">Avaliador(a):
+        <input id="avaliador" type="text" placeholder="Seu nome" class="ml-2 border border-slate-300 rounded-lg px-3 py-1.5 bg-white w-56 max-w-full">
+      </label>
+      <p class="text-xs text-slate-500">Salvamento automático neste navegador.</p>
+    </div>
+    <div id="list" class="space-y-3"></div>
+  </main>
+</div>
+
+<!-- ================= VISÃO DO RELATÓRIO ================= -->
+<div id="reportView" class="hidden">
+  <div class="no-print sticky top-0 z-20 bg-[#0F172A] text-white">
+    <div class="max-w-4xl mx-auto px-4 py-3 flex flex-wrap items-center justify-between gap-2">
+      <button id="btnBack" class="border border-slate-500 hover:bg-slate-800 px-3 py-2 rounded-lg text-sm">← Voltar às avaliações</button>
+      <button id="btnPrint" class="bg-amber-500 hover:bg-amber-400 text-[#0F172A] font-bold px-4 py-2 rounded-lg text-sm">Salvar / Baixar Relatório em PDF</button>
+    </div>
+  </div>
+  <div id="report" class="max-w-4xl mx-auto px-4 py-6 bg-white"></div>
+</div>
+
+<script>
+/* =====================================================
+   Configuração
+   ===================================================== */
+const KEY = 'festa-nacoes-viva-v1';
+const SERIES = ['7º Ano', '8º Ano', '9º Ano'];
+const CRITERIOS = [
+  'Montagem da Barraca (Decoração)',
+  'Organização do Funcionamento',
+  'Produto no Geral',
+  'Apresentação do Produto',
+  'Qualidade do Produto',
+  'Atendimento ao Cliente',
+  'Comportamento dos Alunos'
+];
+
+/* =====================================================
+   Estado e persistência (LocalStorage)
+   ===================================================== */
+let uid = 0;
+const novoEstande = serie => ({ id: 'e' + Date.now() + (uid++), serie, pais: '', produto: '', notas: Array(7).fill(null), obs: '' });
+const estadoInicial = () => ({ avaliador: '', stands: SERIES.map(s => novoEstande(s)) });
+
+let state;
+let tab = SERIES[0];
+const abertos = new Set();
+
+function carregar() {
+  try {
+    const raw = localStorage.getItem(KEY);
+    if (raw) {
+      const d = JSON.parse(raw);
+      // Garante exatamente um estande por série (mantém o primeiro já preenchido)
+      d.stands = SERIES.map(s => (d.stands || []).find(x => x.serie === s) || novoEstande(s));
+      return d;
+    }
+  } catch (e) {}
+  return estadoInicial();
+}
+function salvar() {
+  try { localStorage.setItem(KEY, JSON.stringify(state)); } catch (e) {}
+}
+
+/* =====================================================
+   Utilidades
+   ===================================================== */
+const $ = id => document.getElementById(id);
+const esc = t => String(t ?? '').replace(/[&<>"']/g, c => ({ '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;' }[c]));
+const fmt = n => n.toFixed(2).replace('.', ',');
+const fmtNota = n => (n === null ? '–' : String(n).replace('.', ','));
+/* Média aritmética simples dos 7 critérios (critério em branco conta como 0) */
+const media = s => s.notas.reduce((a, n) => a + (n || 0), 0) / CRITERIOS.length;
+const preenchidos = s => s.notas.filter(n => n !== null).length;
+const completo = s => preenchidos(s) === CRITERIOS.length && s.pais.trim() !== '';
+const estrelas = m => `<span class="stars" style="--p:${(m / 5 * 100).toFixed(1)}%" aria-hidden="true">★★★★★</span>`;
+
+/* =====================================================
+   Abas e lista de estandes
+   ===================================================== */
+function renderTabs() {
+  $('tabs').innerHTML = SERIES.map(s => {
+    const lista = state.stands.filter(x => x.serie === s);
+    const ok = lista.filter(completo).length;
+    return `<button data-tab="${s}" class="${s === tab ? 'tab-on' : 'tab-off'} py-2 font-semibold whitespace-nowrap">${s} <span class="text-xs font-normal opacity-80">${ok}/${lista.length}</span></button>`;
+  }).join('');
+}
+
+function cardHtml(s) {
+  const m = media(s);
+  const criterios = CRITERIOS.map((nome, i) => {
+    const v = s.notas[i];
+    return `<div class="flex items-center gap-3 py-2 border-b border-slate-100 last:border-0">
+      <label class="flex-1 text-sm font-medium" for="n-${s.id}-${i}">${i + 1}. ${nome}</label>
+      <input type="range" min="0" max="5" step="0.5" value="${v ?? 0}" data-id="${s.id}" data-i="${i}" data-src="range" class="w-28 sm:w-40" aria-label="${nome}">
+      <input id="n-${s.id}-${i}" type="number" min="0" max="5" step="0.1" inputmode="decimal" value="${v ?? ''}" placeholder="0–5" data-id="${s.id}" data-i="${i}" data-src="num"
+        class="w-16 text-center border border-slate-300 rounded-lg py-1 font-semibold">
+    </div>`;
+  }).join('');
+
+  return `<details class="bg-white rounded-xl shadow-sm border border-slate-200" data-id="${s.id}" open>
+    <summary class="flex items-center gap-3 p-4">
+      <span class="chev text-slate-400">▶</span>
+      <div class="min-w-0 flex-1">
+        <p class="font-bold truncate" id="t-${s.id}">${esc(s.pais) || 'Novo estande'}</p>
+        <p class="text-sm text-slate-500 truncate" id="p-${s.id}">${esc(s.produto) || 'Produto não informado'}</p>
+      </div>
+      <span id="ok-${s.id}" class="text-xs font-semibold px-2 py-1 rounded-full"></span>
+      <div class="text-right">
+        <div class="text-2xl font-bold leading-none" id="a-${s.id}">${fmt(m)}</div>
+        <div id="s-${s.id}">${estrelas(m)}</div>
+      </div>
+    </summary>
+    <div class="px-4 pb-4 border-t border-slate-100">
+      <div class="grid sm:grid-cols-3 gap-3 mt-4">
+        <div><label class="text-xs font-semibold text-slate-500">Série</label>
+          <select disabled data-id="${s.id}" data-f="serie" class="w-full border border-slate-300 rounded-lg px-3 py-2 bg-slate-100">
+            ${SERIES.map(x => `<option ${x === s.serie ? 'selected' : ''}>${x}</option>`).join('')}</select></div>
+        <div><label class="text-xs font-semibold text-slate-500">País representado</label>
+          <input list="paises" value="${esc(s.pais)}" data-id="${s.id}" data-f="pais" placeholder="Ex.: México" class="w-full border border-slate-300 rounded-lg px-3 py-2"></div>
+        <div><label class="text-xs font-semibold text-slate-500">Produto vendido</label>
+          <input value="${esc(s.produto)}" data-id="${s.id}" data-f="produto" placeholder="Ex.: Tacos" class="w-full border border-slate-300 rounded-lg px-3 py-2"></div>
+      </div>
+      <div class="mt-3">${criterios}</div>
+      <div class="mt-3 flex items-center justify-between bg-[#0F172A] text-white rounded-lg px-4 py-3">
+        <span class="font-semibold">Média final</span>
+        <span class="flex items-center gap-3"><span id="b-${s.id}" class="text-xl font-bold text-amber-400">${fmt(m)}</span><span id="bs-${s.id}">${estrelas(m)}</span></span>
+      </div>
+      <label class="block mt-3 text-sm font-semibold">Feedback / Observações do Avaliador</label>
+      <textarea rows="3" data-id="${s.id}" data-f="obs" placeholder="Pontos fortes, sugestões, destaques… (não altera a média)" class="w-full border border-slate-300 rounded-lg px-3 py-2 mt-1">${esc(s.obs)}</textarea>
+    </div>
+  </details>`;
+}
+
+function renderList() {
+  const lista = state.stands.filter(s => s.serie === tab);
+  $('list').innerHTML = lista.length ? lista.map(cardHtml).join('') : '<p class="text-center text-slate-500 py-10">Nenhum estande nesta série. Adicione o primeiro abaixo.</p>';
+  lista.forEach(atualizarCard);
+  if (!$('paises')) {
+    const dl = document.createElement('datalist'); dl.id = 'paises';
+    ['Alemanha','Argentina','Brasil','Canadá','China','Egito','Espanha','Estados Unidos','França','Grécia','Índia','Itália','Japão','México','Peru','Portugal','Reino Unido','Suíça','Turquia'].forEach(p => dl.innerHTML += `<option value="${p}">`);
+    document.body.appendChild(dl);
+  }
+}
+
+/* Atualiza apenas os indicadores de um card (sem recriar inputs, para não perder o foco) */
+function atualizarCard(s) {
+  if (typeof s === 'string') s = state.stands.find(x => x.id === s);
+  const m = media(s), c = completo(s);
+  $('a-' + s.id).textContent = fmt(m);
+  $('b-' + s.id).textContent = fmt(m);
+  $('s-' + s.id).innerHTML = estrelas(m);
+  $('bs-' + s.id).innerHTML = estrelas(m);
+  $('t-' + s.id).textContent = s.pais || 'Novo estande';
+  $('p-' + s.id).textContent = s.produto || 'Produto não informado';
+  const ok = $('ok-' + s.id);
+  ok.textContent = c ? 'Completo' : `${preenchidos(s)}/7`;
+  ok.className = 'text-xs font-semibold px-2 py-1 rounded-full ' + (c ? 'bg-green-100 text-green-700' : 'bg-amber-100 text-amber-700');
+}
+
+/* =====================================================
+   Eventos (delegação)
+   ===================================================== */
+$('list').addEventListener('input', e => {
+  const el = e.target, s = state.stands.find(x => x.id === el.dataset.id);
+  if (!s) return;
+  if (el.dataset.i !== undefined) {
+    const i = +el.dataset.i;
+    let n = parseFloat(String(el.value).replace(',', '.'));
+    n = isNaN(n) ? null : Math.min(5, Math.max(0, Math.round(n * 10) / 10));
+    s.notas[i] = n;
+    // Sincroniza o controle irmão (slider ↔ campo numérico)
+    const outro = el.dataset.src === 'range' ? 'num' : 'range';
+    const irmao = el.closest('div').querySelector(`[data-src="${outro}"]`);
+    if (outro === 'num') irmao.value = n ?? '';
+    else irmao.value = n ?? 0;
+  } else if (el.dataset.f) {
+    s[el.dataset.f] = el.value;
+    if (el.dataset.f === 'serie') { salvar(); tab = el.value; abertos.add(s.id); renderTabs(); renderList(); return; }
+  }
+  salvar(); atualizarCard(s); renderTabs();
+});
+$('list').addEventListener('toggle', e => {
+  const id = e.target.dataset && e.target.dataset.id;
+  if (id) e.target.open ? abertos.add(id) : abertos.delete(id);
+}, true);
+$('tabs').addEventListener('click', e => {
+  if (e.target.closest('[data-tab]')) { tab = e.target.closest('[data-tab]').dataset.tab; renderTabs(); renderList(); }
+});
+$('avaliador').oninput = e => { state.avaliador = e.target.value; salvar(); };
+$('btnReset').onclick = () => {
+  if (confirm('Apagar TODAS as notas, observações e estandes e reiniciar as avaliações? Esta ação não pode ser desfeita.')) {
+    state = estadoInicial(); abertos.clear(); salvar(); $('avaliador').value = ''; renderTabs(); renderList();
+  }
+};
+
+/* =====================================================
+   Relatório final e ranking
+   ===================================================== */
+function renderReport() {
+  // Ordena da maior para a menor média; empates dividem a mesma posição
+  const lista = state.stands.map(s => ({ ...s, m: media(s) })).sort((a, b) => b.m - a.m);
+  let pos = 0, ant = null;
+  lista.forEach((s, i) => { if (s.m !== ant) { pos = i + 1; ant = s.m; } s.pos = pos; });
+  const medalha = p => (p === 1 ? '🥇' : p === 2 ? '🥈' : p === 3 ? '🥉' : '');
+  const nome = s => esc(s.pais) || '<em>País não informado</em>';
+
+  const linhas = lista.map(s => `<tr class="${s.pos <= 3 ? 'bg-amber-50' : ''} border-b border-slate-200">
+      <td class="py-2 px-2 font-bold">${s.pos}º ${medalha(s.pos)}</td>
+      <td class="py-2 px-2">${esc(s.serie)}</td>
+      <td class="py-2 px-2 font-semibold">${nome(s)}</td>
+      <td class="py-2 px-2">${esc(s.produto) || '–'}</td>
+      <td class="py-2 px-2 text-right font-bold">${fmt(s.m)}</td></tr>`).join('');
+
+  const detalhes = lista.map(s => `<section class="stand-report rep-card border border-slate-200 rounded-xl p-4 mb-4">
+      <div class="flex items-start justify-between gap-3 border-b border-slate-200 pb-2 mb-2">
+        <div><p class="text-lg font-bold serif">${s.pos}º lugar · ${nome(s)}</p>
+          <p class="text-sm text-slate-600">${esc(s.serie)} · Produto: ${esc(s.produto) || '–'}</p></div>
+        <div class="text-right"><p class="text-2xl font-bold text-[#0F172A]">${fmt(s.m)}</p>${estrelas(s.m)}</div>
+      </div>
+      <table class="w-full text-sm"><tbody>${CRITERIOS.map((c, i) => `<tr class="border-b border-slate-100"><td class="py-1">${i + 1}. ${c}</td><td class="py-1 text-right font-semibold w-16">${fmtNota(s.notas[i])}</td></tr>`).join('')}</tbody></table>
+      <p class="mt-2 text-sm"><strong>Observações:</strong> ${s.obs.trim() ? esc(s.obs).replace(/\n/g, '<br>') : '<span class="text-slate-500">Sem observações.</span>'}</p>
+    </section>`).join('');
+
+  $('report').innerHTML = `
+    <div class="bg-[#0F172A] text-white rounded-xl p-5 mb-5" style="-webkit-print-color-adjust:exact;print-color-adjust:exact">
+      <h2 class="text-2xl font-bold">Relatório Final · Festa das Nações</h2>
+      <p class="text-amber-400 font-medium">Ciclo VIVA · 7º, 8º e 9º Anos</p>
+      <p class="text-sm text-slate-300 mt-1">Avaliador(a): ${esc(state.avaliador) || 'não informado'} · Emitido em ${new Date().toLocaleDateString('pt-BR')}</p>
+    </div>
+    <h3 class="text-lg font-bold serif mb-2">Ranking geral</h3>
+    <table class="w-full text-sm mb-6"><thead><tr class="bg-green-700 text-white text-left" style="-webkit-print-color-adjust:exact;print-color-adjust:exact">
+      <th class="py-2 px-2">Posição</th><th class="py-2 px-2">Série</th><th class="py-2 px-2">País</th><th class="py-2 px-2">Produto</th><th class="py-2 px-2 text-right">Média</th></tr></thead>
+      <tbody>${linhas}</tbody></table>
+    <h3 class="text-lg font-bold serif mb-2">Detalhamento por estande</h3>${detalhes}`;
+}
+$('btnReport').onclick = () => { renderReport(); $('appView').classList.add('hidden'); $('reportView').classList.remove('hidden'); window.scrollTo(0, 0); };
+$('btnBack').onclick = () => { $('reportView').classList.add('hidden'); $('appView').classList.remove('hidden'); };
+$('btnPrint').onclick = () => { renderReport(); window.print(); };
+window.addEventListener('beforeprint', renderReport);
+
+/* =====================================================
+   Inicialização
+   ===================================================== */
+state = carregar();
+$('avaliador').value = state.avaliador || '';
+renderTabs();
+renderList();
+</script>
+</body>
+</html>
